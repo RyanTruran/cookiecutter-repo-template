@@ -1,0 +1,67 @@
+name: Setup repository
+on:
+  push:
+    paths:
+      - cookiecutter.json
+env:
+  API_BASE: https://api.github.com
+jobs:
+  setup:
+    name: Reinitialize repository
+    runs-on: ubuntu-latest
+    env:
+      REPO_SETUP_TOKEN: ${{ secrets.REPO_SETUP_TOKEN }}
+    steps:
+      - name: Check if template repository
+        id: check_template
+        run: |
+          echo "is_template=$(curl --silent -X GET \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.json" \
+            $API_BASE/repos/$GITHUB_REPOSITORY | jq '.is_template')" >> $GITHUB_ENV
+      - uses: actions/checkout@v2
+        if: ${{ env.is_template == 'false' }}
+        with:
+          token: ${{ env.REPO_SETUP_TOKEN }}
+
+      - uses: actions/setup-python@v2
+        if: ${{ env.is_template == 'false' }}
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        if: ${{ env.is_template == 'false' }}
+        run: pip install cookiecutter
+
+      - name: Scaffolding repository
+        if: ${{ env.is_template == 'false' }}
+        run: cookiecutter . --no-input --output-dir ./cookiecutter-temp
+
+      - name: Prepare root directory
+        if: ${{ env.is_template == 'false' }}
+        shell: bash
+        run: |
+          find ./ -maxdepth 1 \
+          ! -name '.git' \
+          ! -name 'cookiecutter-temp' \
+          ! -name '.' \
+          ! -exec rm -rf {} +
+
+      - name: Move files to root
+        if: ${{ env.is_template == 'false' }}
+        shell: bash
+        run: |
+          cp -R ./cookiecutter-temp/*/. . && \
+          rm -rf ./cookiecutter-temp/ 
+          rm -f .gitkeep
+
+      - name: Reinitialize git repository
+        if: ${{ env.is_template == 'false' }}
+        shell: bash
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com" && \
+          git config --global user.name "github-actions[bot]" && \
+          git checkout --orphan temp-branch && \
+          git add . && \
+          git commit -m 'Initial commit' && \
+          git push origin temp-branch:$GITHUB_REF_NAME -f
